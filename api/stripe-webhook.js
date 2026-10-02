@@ -1,0 +1,7 @@
+import Stripe from 'stripe'
+import { createClient } from '@supabase/supabase-js'
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '')
+const supabase = createClient(process.env.SUPABASE_URL || '', process.env.SUPABASE_SERVICE_ROLE_KEY || '')
+export const config = { api: { bodyParser: false } }
+async function rawBody(req) { const chunks=[]; for await (const chunk of req) chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk); return Buffer.concat(chunks) }
+export default async function handler(req,res){ if(req.method!=='POST') return res.status(405).end(); try{const body=await rawBody(req);const signature=req.headers['stripe-signature'];const event=stripe.webhooks.constructEvent(body,signature,process.env.STRIPE_WEBHOOK_SECRET);if(event.type==='checkout.session.completed'){const session=event.data.object;const orderId=session.metadata?.order_id;if(orderId){await supabase.from('orders').update({status:'paid',payment_status:'paid',stripe_payment_intent_id:session.payment_intent,updated_at:new Date().toISOString()}).eq('id',orderId)}}if(event.type==='checkout.session.expired'){const session=event.data.object;const orderId=session.metadata?.order_id;if(orderId)await supabase.from('orders').update({status:'cancelled',payment_status:'expired',updated_at:new Date().toISOString()}).eq('id',orderId)}return res.status(200).json({received:true})}catch(error){console.error(error);return res.status(400).send(`Webhook Error: ${error.message}`)}}

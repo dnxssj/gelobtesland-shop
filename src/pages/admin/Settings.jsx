@@ -1,0 +1,3 @@
+import React from 'react';
+export default function Settings(){return <div><div className="admin-page-head"><div><p className="eyebrow">STORE</p><h1>Einstellungen</h1></div></div><div className="admin-panel settings-list"><label>Shopname<input value="Gelobtes Land" readOnly/></label><label>Domain<input value="https://odenwald-honig.com" readOnly/></label><label>Standardsprache<select defaultValue="de"><option value="de">Deutsch</option><option value="en">English</option><option value="es">Español</option></select></label><div className="setup-note">Zahlungsanbieter, Mailversand und produktive Datenbank werden ausschließlich über Server-Environment-Variablen und die jeweilige Provider-Konfiguration verbunden.</div></div></div>}
+
