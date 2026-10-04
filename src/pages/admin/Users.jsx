@@ -1,0 +1,15 @@
+import React, { useEffect, useState } from 'react'
+import { ShieldCheck, UserCog } from 'lucide-react'
+import { useAuth } from '../../contexts/AuthContext'
+import { supabase } from '../../lib/supabase'
+import { formatDate } from '../../lib/admin'
+
+const roles = ['admin', 'manager', 'staff']
+
+export default function Users() {
+  const { profile } = useAuth(); const [users, setUsers] = useState([]); const [loading, setLoading] = useState(true); const [error, setError] = useState(''); const [saving, setSaving] = useState(null); const [notice, setNotice] = useState('')
+  async function load() { if (!supabase) { setError('Supabase ist nicht konfiguriert.'); setLoading(false); return } setLoading(true); const { data, error: dbError } = await supabase.from('profiles').select('id,email,full_name,role,created_at').order('created_at', { ascending: false }); if (dbError) setError(dbError.message); else setUsers(data || []); setLoading(false) }
+  useEffect(() => { load() }, [])
+  async function updateUser(user, field, value) { if (user.id === profile?.id && field === 'role') { setError('Deine eigene Admin-Rolle kann hier nicht geändert werden.'); return } if (field === 'role' && user.role === 'admin' && value !== 'admin') { const adminCount = users.filter(u => u.role === 'admin').length; if (adminCount <= 1) { setError('Der letzte Administrator kann nicht herabgestuft werden.'); return } } setSaving(user.id); setError(''); setNotice(''); const { error: dbError } = await supabase.from('profiles').update({ [field]: value }).eq('id', user.id); if (dbError) setError(dbError.message); else { setNotice('Benutzer aktualisiert.'); await load() } setSaving(null) }
+  return <div><div className="admin-page-head"><div><p className="eyebrow">ZUGRIFF</p><h1>Benutzer & Rollen</h1><p className="admin-subtitle">Nur Administratoren können Rollen ändern.</p></div></div>{error && <div className="form-error admin-error">{error}</div>}{notice && <div className="admin-success">{notice}</div>}<section className="admin-panel">{loading ? <div className="admin-loading">Benutzer werden geladen…</div> : users.length === 0 ? <div className="empty-state"><UserCog size={26}/><h2>Keine Benutzer</h2></div> : <div className="admin-table admin-table--responsive"><div className="admin-row admin-row--head"><span>Benutzer</span><span>Name</span><span>Rolle</span><span>Erstellt</span><span></span></div>{users.map(user => <div className="admin-row" key={user.id}><span><strong>{user.email}</strong>{user.id === profile?.id && <small>Du</small>}</span><span><input className="admin-inline-input" value={user.full_name || ''} onChange={e => setUsers(current => current.map(u => u.id === user.id ? {...u,full_name:e.target.value} : u))} onBlur={e => updateUser(user, 'full_name', e.target.value)}/></span><span><select value={user.role} disabled={saving === user.id || user.id === profile?.id} onChange={e => updateUser(user, 'role', e.target.value)}>{roles.map(role => <option key={role} value={role}>{role}</option>)}</select></span><span>{formatDate(user.created_at)}</span><span><ShieldCheck size={17}/></span></div>)}</div>}</section></div>
+}
