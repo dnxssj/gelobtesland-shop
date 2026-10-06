@@ -84,7 +84,41 @@ export default async function handler(req, res) {
           break
         }
 
-        const { error } = await supabase.rpc(
+        /*
+         * Sicherheitsprüfung:
+         * Die Stripe-Session muss exakt zu der Bestellung gehören,
+         * die über die Metadata referenziert wird.
+         */
+        const { data: order, error: orderError } = await supabase
+          .from('orders')
+          .select('id, stripe_checkout_session_id, payment_status')
+          .eq('id', orderId)
+          .single()
+
+        if (orderError) {
+          throw orderError
+        }
+
+        if (!order) {
+          throw new Error(`Order not found: ${orderId}`)
+        }
+
+        if (order.stripe_checkout_session_id !== session.id) {
+          throw new Error(
+            `Stripe session mismatch for order ${orderId}`
+          )
+        }
+
+        /*
+         * Webhooks können mehrfach zugestellt werden.
+         * Wenn die Bestellung bereits bezahlt ist, ist nichts mehr zu tun.
+         */
+        if (order.payment_status === 'paid') {
+          console.log(`Order ${orderId} is already paid.`)
+          break
+        }
+
+        const { error: finalizeError } = await supabase.rpc(
           'finalize_paid_order',
           {
             p_order_id: orderId,
@@ -95,14 +129,14 @@ export default async function handler(req, res) {
           }
         )
 
-        if (error) {
+        if (finalizeError) {
           console.error(
             'Could not finalize order:',
             orderId,
-            error
+            finalizeError
           )
 
-          throw error
+          throw finalizeError
         }
 
         console.log(
@@ -116,13 +150,47 @@ export default async function handler(req, res) {
         const session = event.data.object
         const orderId = session.metadata?.order_id
 
-        if (!orderId) break
+        if (!orderId) {
+          break
+        }
+
+        /*
+         * Sicherheitsprüfung:
+         * Auch beim Expiry darf nur die Bestellung geändert werden,
+         * die tatsächlich zu dieser Stripe-Session gehört.
+         */
+        const { data: order, error: orderError } = await supabase
+          .from('orders')
+          .select('id, stripe_checkout_session_id, payment_status')
+          .eq('id', orderId)
+          .single()
+
+        if (orderError) {
+          throw orderError
+        }
+
+        if (!order) {
+          throw new Error(`Order not found: ${orderId}`)
+        }
+
+        if (order.stripe_checkout_session_id !== session.id) {
+          throw new Error(
+            `Stripe session mismatch for expired order ${orderId}`
+          )
+        }
 
         /*
          * Eine bereits bezahlte Bestellung darf nicht
          * nachträglich auf cancelled gesetzt werden.
          */
-        const { error } = await supabase
+        if (order.payment_status === 'paid') {
+          console.log(
+            `Expired session ${session.id} belongs to an already paid order ${orderId}.`
+          )
+          break
+        }
+
+        const { error: expireError } = await supabase
           .from('orders')
           .update({
             status: 'cancelled',
@@ -130,11 +198,16 @@ export default async function handler(req, res) {
             updated_at: new Date().toISOString(),
           })
           .eq('id', orderId)
+          .eq('stripe_checkout_session_id', session.id)
           .neq('payment_status', 'paid')
 
-        if (error) {
-          throw error
+        if (expireError) {
+          throw expireError
         }
+
+        console.log(
+          `Order ${orderId} was cancelled because the Stripe session expired.`
+        )
 
         break
       }
